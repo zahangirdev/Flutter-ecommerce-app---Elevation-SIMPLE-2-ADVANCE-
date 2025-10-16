@@ -1,0 +1,818 @@
+// main.dart
+import 'package:flutter/material.dart';
+import 'package:get/get.dart';
+
+// ===================== MODELS =====================
+class Product {
+  int id;
+  String name;
+  String category;
+  String description;
+  double price;
+  String image;
+  RxBool isFavorite = false.obs;
+
+  Product({
+    required this.id,
+    required this.name,
+    required this.category,
+    required this.description,
+    required this.price,
+    required this.image,
+  });
+}
+
+class CartItem {
+  Product product;
+  RxInt qty = 1.obs;
+  CartItem({required this.product, int initialQty = 1}) {
+    qty.value = initialQty;
+  }
+
+  double get subtotal => product.price * qty.value;
+}
+
+class Order {
+  int id;
+  List<CartItem> items;
+  double total;
+  String customerName;
+  String address;
+  RxString status = "Pending".obs; // Pending / Approved
+  DateTime createdAt;
+
+  Order({
+    required this.id,
+    required this.items,
+    required this.total,
+    required this.customerName,
+    required this.address,
+    required this.createdAt,
+  });
+}
+
+// ===================== CONTROLLER =====================
+class ShopController extends GetxController {
+  // Sample categories
+  final categories = <String>['All', 'Toys', 'Books', 'Plush', 'Vehicles'].obs;
+
+  // Products
+  var products = <Product>[].obs;
+
+  // Cart
+  var cart = <CartItem>[].obs;
+
+  // Favorites
+  var favorites = <Product>[].obs;
+
+  // Orders
+  var orders = <Order>[].obs;
+
+  // UI state
+  var selectedCategory = 'All'.obs;
+  var searchQuery = ''.obs;
+  var sortMode = 'Default'.obs; // 'Default', 'PriceLowHigh', 'PriceHighLow'
+
+  @override
+  void onInit() {
+    super.onInit();
+    // initial sample products
+    products.assignAll([
+      Product(
+        id: 1,
+        name: "Teddy Bear",
+        category: "Plush",
+        description: "Soft and cuddly teddy bear.",
+        price: 25.0,
+        image: "https://cdn-icons-png.flaticon.com/512/616/616408.png",
+      ),
+      Product(
+        id: 2,
+        name: "Coloring Book",
+        category: "Books",
+        description: "Lots of fun pictures to color!",
+        price: 8.5,
+        image: "https://cdn-icons-png.flaticon.com/512/2232/2232688.png",
+      ),
+      Product(
+        id: 3,
+        name: "Toy Car",
+        category: "Vehicles",
+        description: "Small fast toy car.",
+        price: 12.0,
+        image: "https://cdn-icons-png.flaticon.com/512/2965/2965870.png",
+      ),
+      Product(
+        id: 4,
+        name: "Dinosaur Plush",
+        category: "Plush",
+        description: "Green dino soft toy.",
+        price: 30.0,
+        image: "https://cdn-icons-png.flaticon.com/512/2910/2910768.png",
+      ),
+      Product(
+        id: 5,
+        name: "Puzzle Book",
+        category: "Books",
+        description: "Puzzles for kids to think and play.",
+        price: 10.0,
+        image: "https://cdn-icons-png.flaticon.com/512/219/219983.png",
+      ),
+    ]);
+  }
+
+  // ----- Product CRUD (Admin) -----
+  void addProduct(
+      String name, String category, String desc, double price, String image) {
+    final newId = products.isEmpty
+        ? 1
+        : products.map((p) => p.id).reduce((a, b) => a > b ? a : b) + 1;
+    products.add(Product(
+        id: newId,
+        name: name,
+        category: category,
+        description: desc,
+        price: price,
+        image: image));
+  }
+
+  void updateProduct(int id, String name, String category, String desc,
+      double price, String image) {
+    final idx = products.indexWhere((p) => p.id == id);
+    if (idx != -1) {
+      products[idx].name = name;
+      products[idx].category = category;
+      products[idx].description = desc;
+      products[idx].price = price;
+      products[idx].image = image;
+      products.refresh();
+    }
+  }
+
+  void deleteProduct(int id) {
+    products.removeWhere((p) => p.id == id);
+  }
+
+  // ----- Favorites -----
+  void toggleFavorite(Product p) {
+    p.isFavorite.value = !p.isFavorite.value;
+    if (p.isFavorite.value) {
+      if (!favorites.contains(p)) favorites.add(p);
+    } else {
+      favorites.remove(p);
+    }
+  }
+
+  // ----- Cart operations -----
+  void addToCart(Product p, {int qty = 1}) {
+    final idx = cart.indexWhere((c) => c.product.id == p.id);
+    if (idx != -1) {
+      cart[idx].qty.value += qty;
+    } else {
+      cart.add(CartItem(product: p, initialQty: qty));
+    }
+  }
+
+  void removeFromCart(CartItem item) {
+    cart.remove(item);
+  }
+
+  void increaseQty(CartItem item) {
+    item.qty.value++;
+    cart.refresh();
+  }
+
+  void decreaseQty(CartItem item) {
+    if (item.qty.value > 1) {
+      item.qty.value--;
+      cart.refresh();
+    } else {
+      removeFromCart(item);
+    }
+  }
+
+  double get cartTotal => cart.fold(0.0, (sum, it) => sum + it.subtotal);
+
+  // ----- Checkout (Cash on Delivery) -----
+  void checkoutCOD(String customerName, String address) {
+    if (cart.isEmpty) return;
+    final newId = orders.isEmpty
+        ? 1
+        : orders.map((o) => o.id).reduce((a, b) => a > b ? a : b) + 1;
+    final order = Order(
+      id: newId,
+      items: cart
+          .map((c) => CartItem(product: c.product, initialQty: c.qty.value))
+          .toList(),
+      total: cartTotal,
+      customerName: customerName,
+      address: address,
+      createdAt: DateTime.now(),
+    );
+    orders.add(order);
+    cart.clear();
+  }
+
+  // Approve order (Admin)
+  void approveOrder(Order o) {
+    o.status.value = "Approved";
+    orders.refresh();
+  }
+
+  // ----- Product Filtering / Sorting -----
+  List<Product> get filteredProducts {
+    var list = products.toList();
+
+    // category filter
+    if (selectedCategory.value != 'All') {
+      list = list.where((p) => p.category == selectedCategory.value).toList();
+    }
+
+    // search filter
+    final q = searchQuery.value.trim().toLowerCase();
+    if (q.isNotEmpty) {
+      list = list
+          .where((p) =>
+              p.name.toLowerCase().contains(q) ||
+              p.description.toLowerCase().contains(q))
+          .toList();
+    }
+
+    // sort
+    if (sortMode.value == 'PriceLowHigh') {
+      list.sort((a, b) => a.price.compareTo(b.price));
+    } else if (sortMode.value == 'PriceHighLow') {
+      list.sort((a, b) => b.price.compareTo(a.price));
+    }
+
+    return list;
+  }
+}
+
+// ===================== MAIN APP =====================
+void main() {
+  runApp(const MyApp());
+}
+
+class MyApp extends StatelessWidget {
+  const MyApp({super.key});
+  @override
+  Widget build(BuildContext context) {
+    return GetMaterialApp(
+      title: 'Kids Shop Advanced',
+      debugShowCheckedModeBanner: false,
+      theme: ThemeData(primarySwatch: Colors.purple),
+      home: ProductListPage(),
+    );
+  }
+}
+//
+// ===================== UI PAGES =====================
+
+// ---------- Product List (Home) ----------
+class ProductListPage extends StatelessWidget {
+  final ShopController c = Get.put(ShopController());
+  ProductListPage({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text("🎁 Kids Shop"),
+        actions: [
+          IconButton(
+              icon: const Icon(Icons.favorite),
+              onPressed: () => Get.to(() => FavoritePage())),
+          IconButton(
+              icon: const Icon(Icons.shopping_cart),
+              onPressed: () => Get.to(() => CartPage())),
+          IconButton(
+              icon: const Icon(Icons.admin_panel_settings),
+              onPressed: () => Get.to(() => AdminPage())),
+        ],
+      ),
+      body: Padding(
+        padding: const EdgeInsets.all(8.0),
+        child: Column(
+          children: [
+            // Search + Category + Sort Row
+            Row(
+              children: [
+                Expanded(
+                  child: TextField(
+                    onChanged: (v) => c.searchQuery.value = v,
+                    decoration: const InputDecoration(
+                      hintText: "Search products...",
+                      prefixIcon: Icon(Icons.search),
+                      border: OutlineInputBorder(),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Obx(() => DropdownButton<String>(
+                      value: c.selectedCategory.value,
+                      items: c.categories
+                          .map((cat) =>
+                              DropdownMenuItem(value: cat, child: Text(cat)))
+                          .toList(),
+                      onChanged: (val) {
+                        if (val != null) c.selectedCategory.value = val;
+                      },
+                    )),
+                const SizedBox(width: 8),
+                PopupMenuButton<String>(
+                  onSelected: (s) => c.sortMode.value = s,
+                  itemBuilder: (ctx) => [
+                    const PopupMenuItem(
+                        value: 'Default', child: Text('Default')),
+                    const PopupMenuItem(
+                        value: 'PriceLowHigh',
+                        child: Text('Price: Low → High')),
+                    const PopupMenuItem(
+                        value: 'PriceHighLow',
+                        child: Text('Price: High → Low')),
+                  ],
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 8.0),
+                    child: Row(children: [
+                      const Icon(Icons.sort),
+                      Obx(() => Text(" ${c.sortMode.value}"))
+                    ]),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 10),
+            // Product Grid
+            Expanded(
+              child: Obx(() {
+                final list = c.filteredProducts;
+                if (list.isEmpty)
+                  return const Center(child: Text("No products found."));
+                return GridView.builder(
+                  gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                      crossAxisCount: 2, childAspectRatio: 0.8),
+                  itemCount: list.length,
+                  itemBuilder: (context, idx) {
+                    final p = list[idx];
+                    return Card(
+                      shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12)),
+                      child: InkWell(
+                        onTap: () =>
+                            Get.to(() => ProductDetailPage(product: p)),
+                        child: Column(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            Image.network(p.image, height: 80),
+                            const SizedBox(height: 6),
+                            Text(p.name,
+                                style: const TextStyle(
+                                    fontWeight: FontWeight.bold)),
+                            Text(p.category,
+                                style: const TextStyle(fontSize: 12)),
+                            Text("\$${p.price.toStringAsFixed(2)}",
+                                style: const TextStyle(color: Colors.purple)),
+                            const SizedBox(height: 6),
+                            Row(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: [
+                                Obx(() => IconButton(
+                                      icon: Icon(
+                                          p.isFavorite.value
+                                              ? Icons.favorite
+                                              : Icons.favorite_border,
+                                          color: Colors.pink),
+                                      onPressed: () => c.toggleFavorite(p),
+                                    )),
+                                ElevatedButton(
+                                  onPressed: () {
+                                    c.addToCart(p);
+                                    Get.snackbar(
+                                        "Added", "${p.name} added to cart",
+                                        snackPosition: SnackPosition.BOTTOM);
+                                  },
+                                  child: const Text("Add"),
+                                )
+                              ],
+                            )
+                          ],
+                        ),
+                      ),
+                    );
+                  },
+                );
+              }),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// ---------- Product Detail ----------
+class ProductDetailPage extends StatelessWidget {
+  final Product product;
+  final ShopController c = Get.find();
+  ProductDetailPage({super.key, required this.product});
+
+  final qtyCtrl = TextEditingController(text: '1');
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: Text(product.name), actions: [
+        IconButton(
+            icon: const Icon(Icons.favorite),
+            onPressed: () => c.toggleFavorite(product))
+      ]),
+      body: Padding(
+        padding: const EdgeInsets.all(16.0),
+        child: Column(
+          children: [
+            Image.network(product.image, height: 140),
+            const SizedBox(height: 12),
+            Text(product.name,
+                style:
+                    const TextStyle(fontSize: 22, fontWeight: FontWeight.bold)),
+            const SizedBox(height: 6),
+            Text(product.description),
+            const SizedBox(height: 8),
+            Text("Category: ${product.category}"),
+            const SizedBox(height: 8),
+            Text("Price: \$${product.price.toStringAsFixed(2)}",
+                style: const TextStyle(fontSize: 18, color: Colors.purple)),
+            const SizedBox(height: 12),
+            Row(
+              children: [
+                const Text("Qty: "),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: TextField(
+                    controller: qtyCtrl,
+                    keyboardType: TextInputType.number,
+                    decoration: const InputDecoration(
+                        border: OutlineInputBorder(), hintText: '1'),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            ElevatedButton.icon(
+              onPressed: () {
+                final q = int.tryParse(qtyCtrl.text) ?? 1;
+                c.addToCart(product, qty: q);
+                Get.snackbar("Added", "${product.name} x$q added to cart",
+                    snackPosition: SnackPosition.BOTTOM);
+              },
+              icon: const Icon(Icons.shopping_cart),
+              label: const Text("Add to Cart (COD supported at checkout)"),
+            )
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// ---------- Favorites ----------
+class FavoritePage extends StatelessWidget {
+  final ShopController c = Get.find();
+  FavoritePage({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: const Text("❤️ Favorites")),
+      body: Obx(() {
+        if (c.favorites.isEmpty)
+          return const Center(child: Text("No favorites yet."));
+        return ListView.builder(
+          itemCount: c.favorites.length,
+          itemBuilder: (context, idx) {
+            final p = c.favorites[idx];
+            return ListTile(
+              leading: Image.network(p.image, width: 50),
+              title: Text(p.name),
+              subtitle: Text("\$${p.price.toStringAsFixed(2)} • ${p.category}"),
+              trailing: IconButton(
+                  icon: const Icon(Icons.remove_circle, color: Colors.red),
+                  onPressed: () => c.toggleFavorite(p)),
+            );
+          },
+        );
+      }),
+    );
+  }
+}
+
+// ---------- Cart Page (with qty control & checkout) ----------
+class CartPage extends StatelessWidget {
+  final ShopController c = Get.find();
+  CartPage({super.key});
+
+  final nameCtrl = TextEditingController();
+  final addressCtrl = TextEditingController();
+
+  void _showCheckoutDialog(BuildContext context) {
+    if (c.cart.isEmpty) {
+      Get.snackbar("Cart Empty", "Add something to cart first.",
+          snackPosition: SnackPosition.BOTTOM);
+      return;
+    }
+    Get.defaultDialog(
+      title: "Cash on Delivery",
+      content: Column(
+        children: [
+          TextField(
+              controller: nameCtrl,
+              decoration: const InputDecoration(labelText: "Customer Name")),
+          TextField(
+              controller: addressCtrl,
+              decoration: const InputDecoration(labelText: "Address")),
+          const SizedBox(height: 8),
+          Obx(() => Text("Total: \$${c.cartTotal.toStringAsFixed(2)}",
+              style: const TextStyle(fontWeight: FontWeight.bold))),
+        ],
+      ),
+      onCancel: () {},
+      onConfirm: () {
+        final name = nameCtrl.text.trim();
+        final addr = addressCtrl.text.trim();
+        if (name.isEmpty || addr.isEmpty) {
+          Get.snackbar("Missing Info", "Please fill name and address.",
+              snackPosition: SnackPosition.BOTTOM);
+          return;
+        }
+        c.checkoutCOD(name, addr);
+        nameCtrl.clear();
+        addressCtrl.clear();
+        Get.back();
+        Get.snackbar("Order Placed", "Your order is pending approval.",
+            snackPosition: SnackPosition.BOTTOM);
+      },
+      textConfirm: "Place Order",
+      textCancel: "Cancel",
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: const Text("🛒 Cart")),
+      body: Obx(() {
+        if (c.cart.isEmpty)
+          return const Center(child: Text("Your cart is empty."));
+        return Column(
+          children: [
+            Expanded(
+              child: ListView.builder(
+                itemCount: c.cart.length,
+                itemBuilder: (context, idx) {
+                  final item = c.cart[idx];
+                  return Card(
+                    child: ListTile(
+                      leading: Image.network(item.product.image, width: 50),
+                      title: Text(item.product.name),
+                      subtitle: Obx(() => Text(
+                          "Qty: ${item.qty.value}  •  Subtotal: \$${item.subtotal.toStringAsFixed(2)}")),
+                      trailing: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          IconButton(
+                              icon: const Icon(Icons.add_circle),
+                              onPressed: () => c.increaseQty(item)),
+                          IconButton(
+                              icon: const Icon(Icons.remove_circle),
+                              onPressed: () => c.decreaseQty(item)),
+                        ],
+                      ),
+                    ),
+                  );
+                },
+              ),
+            ),
+            Container(
+              padding: const EdgeInsets.all(12),
+              color: Colors.purple.shade50,
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Obx(() => Text("Total: \$${c.cartTotal.toStringAsFixed(2)}",
+                      style: const TextStyle(
+                          fontSize: 18, fontWeight: FontWeight.bold))),
+                  ElevatedButton.icon(
+                    onPressed: () => _showCheckoutDialog(context),
+                    icon: const Icon(Icons.payment),
+                    label: const Text("Checkout COD"),
+                  ),
+                ],
+              ),
+            )
+          ],
+        );
+      }),
+    );
+  }
+}
+
+// ---------- Admin Page (Add / Edit / Delete / Orders management) ----------
+class AdminPage extends StatelessWidget {
+  final ShopController c = Get.find();
+  AdminPage({super.key});
+
+  final nameCtrl = TextEditingController();
+  final priceCtrl = TextEditingController();
+  final categoryCtrl = TextEditingController();
+  final descCtrl = TextEditingController();
+  final imageCtrl = TextEditingController();
+
+  void _showEditDialog(BuildContext context, Product p) {
+    nameCtrl.text = p.name;
+    priceCtrl.text = p.price.toString();
+    categoryCtrl.text = p.category;
+    descCtrl.text = p.description;
+    imageCtrl.text = p.image;
+
+    Get.defaultDialog(
+      title: "Edit Product",
+      content: SingleChildScrollView(
+        child: Column(
+          children: [
+            TextField(
+                controller: nameCtrl,
+                decoration: const InputDecoration(labelText: "Name")),
+            TextField(
+                controller: priceCtrl,
+                decoration: const InputDecoration(labelText: "Price"),
+                keyboardType: TextInputType.number),
+            TextField(
+                controller: categoryCtrl,
+                decoration: const InputDecoration(labelText: "Category")),
+            TextField(
+                controller: descCtrl,
+                decoration: const InputDecoration(labelText: "Description")),
+            TextField(
+                controller: imageCtrl,
+                decoration: const InputDecoration(labelText: "Image URL")),
+          ],
+        ),
+      ),
+      textCancel: "Cancel",
+      textConfirm: "Update",
+      onConfirm: () {
+        final name = nameCtrl.text.trim();
+        final price = double.tryParse(priceCtrl.text.trim()) ?? p.price;
+        final cat = categoryCtrl.text.trim().isEmpty
+            ? p.category
+            : categoryCtrl.text.trim();
+        final desc = descCtrl.text.trim();
+        final img =
+            imageCtrl.text.trim().isEmpty ? p.image : imageCtrl.text.trim();
+        c.updateProduct(p.id, name.isEmpty ? p.name : name, cat,
+            desc.isEmpty ? p.description : desc, price, img);
+        Get.back();
+        Get.snackbar("Updated", "Product updated successfully.");
+      },
+    );
+  }
+
+  void _clearAddForm() {
+    nameCtrl.clear();
+    priceCtrl.clear();
+    categoryCtrl.clear();
+    descCtrl.clear();
+    imageCtrl.clear();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: const Text("👑 Admin Panel")),
+      body: SingleChildScrollView(
+        padding: const EdgeInsets.all(12),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text("➕ Add New Product",
+                style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+            const SizedBox(height: 8),
+            TextField(
+                controller: nameCtrl,
+                decoration: const InputDecoration(labelText: "Name")),
+            TextField(
+                controller: priceCtrl,
+                decoration: const InputDecoration(labelText: "Price"),
+                keyboardType: TextInputType.number),
+            TextField(
+                controller: categoryCtrl,
+                decoration:
+                    const InputDecoration(labelText: "Category (e.g., Toys)")),
+            TextField(
+                controller: descCtrl,
+                decoration: const InputDecoration(labelText: "Description")),
+            TextField(
+                controller: imageCtrl,
+                decoration: const InputDecoration(labelText: "Image URL")),
+            const SizedBox(height: 8),
+            Row(
+              children: [
+                ElevatedButton(
+                  onPressed: () {
+                    final name = nameCtrl.text.trim();
+                    final price = double.tryParse(priceCtrl.text.trim()) ?? 0.0;
+                    final cat = categoryCtrl.text.trim().isEmpty
+                        ? 'Toys'
+                        : categoryCtrl.text.trim();
+                    final desc = descCtrl.text.trim();
+                    final img = imageCtrl.text.trim().isEmpty
+                        ? 'https://cdn-icons-png.flaticon.com/512/616/616408.png'
+                        : imageCtrl.text.trim();
+                    if (name.isEmpty || price <= 0) {
+                      Get.snackbar("Invalid", "Provide valid name and price.");
+                      return;
+                    }
+                    c.addProduct(name, cat, desc, price, img);
+                    _clearAddForm();
+                    Get.snackbar("Added", "Product added.");
+                  },
+                  child: const Text("Add Product"),
+                ),
+                const SizedBox(width: 8),
+                ElevatedButton(
+                  onPressed: _clearAddForm,
+                  child: const Text("Clear"),
+                )
+              ],
+            ),
+            const SizedBox(height: 16),
+            const Divider(),
+            const SizedBox(height: 8),
+            const Text("🛠 Products",
+                style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+            Obx(() => ListView.builder(
+                  shrinkWrap: true,
+                  physics: const NeverScrollableScrollPhysics(),
+                  itemCount: c.products.length,
+                  itemBuilder: (context, idx) {
+                    final p = c.products[idx];
+                    return Card(
+                      child: ListTile(
+                        leading: Image.network(p.image, width: 50),
+                        title: Text(p.name),
+                        subtitle: Text(
+                            "${p.category} • \$${p.price.toStringAsFixed(2)}"),
+                        trailing: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            IconButton(
+                                icon: const Icon(Icons.edit),
+                                onPressed: () => _showEditDialog(context, p)),
+                            IconButton(
+                                icon:
+                                    const Icon(Icons.delete, color: Colors.red),
+                                onPressed: () {
+                                  c.deleteProduct(p.id);
+                                  Get.snackbar("Deleted", "Product removed.");
+                                }),
+                          ],
+                        ),
+                      ),
+                    );
+                  },
+                )),
+            const SizedBox(height: 16),
+            const Divider(),
+            const SizedBox(height: 8),
+            const Text("📦 Orders",
+                style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+            Obx(() {
+              if (c.orders.isEmpty) return const Text("No orders yet.");
+              return Column(
+                children: c.orders.map((o) {
+                  return Card(
+                    child: ListTile(
+                      title: Obx(() => Text(
+                          "Order #${o.id} • \$${o.total.toStringAsFixed(2)} • ${o.status.value}")),
+                      subtitle: Text(
+                          "By: ${o.customerName}\nAt: ${o.createdAt}\nItems: ${o.items.map((it) => "${it.product.name} x${it.qty.value}").join(', ')}\nAddress: ${o.address}"),
+                      isThreeLine: true,
+                      trailing: Obx(() => o.status.value == "Pending"
+                          ? ElevatedButton(
+                              onPressed: () => c.approveOrder(o),
+                              child: const Text("Approve"))
+                          : const Icon(Icons.check_circle,
+                              color: Colors.green)),
+                    ),
+                  );
+                }).toList(),
+              );
+            })
+          ],
+        ),
+      ),
+    );
+  }
+}
+//
