@@ -1,0 +1,975 @@
+import 'package:flutter/material.dart';
+import 'package:get/get.dart';
+
+// ===================== MODELS =====================
+class Product {
+  int id;
+  String name;
+  String description;
+  double price;
+  String category;
+  // image slider: list of map { 'url': '...', 'title': '...' }
+  List<Map<String, String>> images;
+  RxBool isFavorite = false.obs;
+
+  Product({
+    required this.id,
+    required this.name,
+    required this.description,
+    required this.price,
+    required this.category,
+    required this.images,
+  });
+
+  // helper to copy (for editing)
+  Product copyWith({
+    int? id,
+    String? name,
+    String? description,
+    double? price,
+    String? category,
+    List<Map<String, String>>? images,
+  }) {
+    return Product(
+      id: id ?? this.id,
+      name: name ?? this.name,
+      description: description ?? this.description,
+      price: price ?? this.price,
+      category: category ?? this.category,
+      images: images ?? this.images,
+    );
+  }
+}
+
+class CartItem {
+  Product product;
+  RxInt quantity = 1.obs;
+
+  CartItem({required this.product, int quantity = 1}) {
+    this.quantity.value = quantity;
+  }
+
+  double get total => product.price * quantity.value;
+}
+
+class Order {
+  int id;
+  List<CartItem> items;
+  double total;
+  String paymentMethod; // "COD" or "Card"
+  String name;
+  String phone;
+  String address;
+  DateTime createdAt;
+  RxString status = "Pending".obs; // Pending / Approved
+
+  Order({
+    required this.id,
+    required this.items,
+    required this.total,
+    required this.paymentMethod,
+    required this.name,
+    required this.phone,
+    required this.address,
+    required this.createdAt,
+  });
+}
+
+// ===================== CONTROLLERS =====================
+class ThemeController extends GetxController {
+  var isDark = false.obs;
+
+  void toggleTheme() {
+    isDark.value = !isDark.value;
+    Get.changeThemeMode(isDark.value ? ThemeMode.dark : ThemeMode.light);
+  }
+}
+
+class ShopController extends GetxController {
+  // Products initial sample
+  var products = <Product>[
+    Product(
+      id: 1,
+      name: "🧸 Teddy Bear",
+      description: "Soft cuddly teddy bear for little kids.",
+      price: 25.0,
+      category: "Toys",
+      images: [
+        {
+          'url': 'https://cdn-icons-png.flaticon.com/512/616/616408.png',
+          'title': 'Teddy Front'
+        },
+        {
+          'url': 'https://cdn-icons-png.flaticon.com/512/616/616408.png',
+          'title': 'Teddy Close'
+        },
+      ],
+    ),
+    Product(
+      id: 2,
+      name: "🚗 Toy Car",
+      description: "Fast colorful toy car for playtime.",
+      price: 15.0,
+      category: "Vehicles",
+      images: [
+        {
+          'url': 'https://cdn-icons-png.flaticon.com/512/2965/2965870.png',
+          'title': 'Car Side'
+        },
+        {
+          'url': 'https://cdn-icons-png.flaticon.com/512/2965/2965870.png',
+          'title': 'Car Front'
+        },
+      ],
+    ),
+    Product(
+      id: 3,
+      name: "📚 Coloring Book",
+      description: "Fun coloring book with bright pictures.",
+      price: 10.0,
+      category: "Books",
+      images: [
+        {
+          'url': 'https://cdn-icons-png.flaticon.com/512/2232/2232688.png',
+          'title': 'Coloring pages'
+        },
+      ],
+    ),
+    Product(
+      id: 4,
+      name: "🦖 Dino Toy",
+      description: "Roaring dinosaur for adventure play.",
+      price: 30.0,
+      category: "Toys",
+      images: [
+        {
+          'url': 'https://cdn-icons-png.flaticon.com/512/2910/2910768.png',
+          'title': 'Dino'
+        },
+      ],
+    ),
+  ].obs;
+
+  var cart = <CartItem>[].obs;
+  var favorites = <Product>[].obs;
+  var orders = <Order>[].obs;
+
+  // search & filter
+  var searchText = ''.obs;
+  var selectedCategory = 'All'.obs;
+  var sortByPriceAsc = true.obs;
+
+  // Helper: categories list (derived)
+  List<String> get categories {
+    final set = <String>{};
+    for (var p in products) set.add(p.category);
+    return ['All', ...set.toList()];
+  }
+
+  // Toggle favorite
+  void toggleFavorite(Product p) {
+    p.isFavorite.value = !p.isFavorite.value;
+    if (p.isFavorite.value) {
+      if (!favorites.contains(p)) favorites.add(p);
+    } else {
+      favorites.remove(p);
+    }
+  }
+
+  // Cart logic
+  void addToCart(Product product, {int qty = 1}) {
+    final existing = cart.firstWhereOrNull((c) => c.product.id == product.id);
+    if (existing != null) {
+      existing.quantity.value += qty;
+    } else {
+      cart.add(CartItem(product: product, quantity: qty));
+    }
+  }
+
+  void removeFromCart(CartItem item) {
+    cart.remove(item);
+  }
+
+  void increaseQuantity(CartItem item) {
+    item.quantity.value++;
+  }
+
+  void decreaseQuantity(CartItem item) {
+    if (item.quantity.value > 1) item.quantity.value--;
+  }
+
+  double get totalPrice => cart.fold(0.0, (sum, item) => sum + item.total);
+
+  // Checkout (create order)
+  void checkout({
+    required String name,
+    required String phone,
+    required String address,
+    required String paymentMethod, // "COD" or "Card"
+  }) {
+    if (cart.isEmpty) return;
+    final order = Order(
+      id: orders.length + 1,
+      items: cart
+          .map((c) => CartItem(product: c.product, quantity: c.quantity.value))
+          .toList(),
+      total: totalPrice,
+      paymentMethod: paymentMethod,
+      name: name,
+      phone: phone,
+      address: address,
+      createdAt: DateTime.now(),
+    );
+    orders.add(order);
+    cart.clear();
+  }
+
+  // Admin: add product
+  void addProduct(Product p) {
+    p.id = products.length + 1;
+    products.add(p);
+  }
+
+  // Admin: update product (by id)
+  void updateProduct(Product updated) {
+    final idx = products.indexWhere((p) => p.id == updated.id);
+    if (idx != -1) products[idx] = updated;
+  }
+
+  // Admin: delete product
+  void deleteProduct(int id) {
+    products.removeWhere((p) => p.id == id);
+  }
+
+  // Admin: approve order
+  void approveOrder(Order order) {
+    order.status.value = "Approved";
+  }
+
+  // Sort products by price
+  void sortByPrice(bool asc) {
+    sortByPriceAsc.value = asc;
+    products.sort((a, b) =>
+        asc ? a.price.compareTo(b.price) : b.price.compareTo(a.price));
+    products.refresh();
+  }
+
+  // Filtered products (search + category)
+  List<Product> get filteredProducts {
+    var list = products.toList();
+    if (selectedCategory.value != 'All') {
+      list = list.where((p) => p.category == selectedCategory.value).toList();
+    }
+    if (searchText.value.trim().isNotEmpty) {
+      final q = searchText.value.toLowerCase();
+      list = list
+          .where((p) =>
+              p.name.toLowerCase().contains(q) ||
+              p.description.toLowerCase().contains(q))
+          .toList();
+    }
+    // already sorted by sortByPrice, but ensure stable:
+    list.sort((a, b) => sortByPriceAsc.value
+        ? a.price.compareTo(b.price)
+        : b.price.compareTo(a.price));
+    return list;
+  }
+}
+
+// ===================== MAIN APP =====================
+void main() {
+  runApp(MyApp());
+}
+
+class MyApp extends StatelessWidget {
+  final ThemeController themeCtrl = Get.put(ThemeController());
+  final ShopController shopCtrl = Get.put(ShopController());
+
+  MyApp({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return Obx(() {
+      return GetMaterialApp(
+        debugShowCheckedModeBanner: false,
+        title: 'Kids Shop - GetX',
+        theme: ThemeData(
+          primarySwatch: Colors.purple,
+          brightness: Brightness.light,
+          scaffoldBackgroundColor: Colors.purple.shade50,
+        ),
+        darkTheme: ThemeData(
+          brightness: Brightness.dark,
+          primarySwatch: Colors.purple,
+          scaffoldBackgroundColor: Colors.grey.shade900,
+        ),
+        themeMode: themeCtrl.isDark.value ? ThemeMode.dark : ThemeMode.light,
+        home: ProductListPage(),
+      );
+    });
+  }
+}
+
+// ===================== UI PAGES =====================
+
+// ---------- Product List Page ----------
+class ProductListPage extends StatelessWidget {
+  final ShopController c = Get.find();
+  final ThemeController t = Get.find();
+
+  ProductListPage({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text("🎁 Kids Shop"),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.favorite, color: Colors.pink),
+            onPressed: () => Get.to(() => FavoritePage()),
+          ),
+          IconButton(
+              icon: const Icon(Icons.shopping_cart),
+              onPressed: () => Get.to(() => CartPage())),
+          IconButton(
+              icon: const Icon(Icons.admin_panel_settings),
+              onPressed: () => Get.to(() => AdminPage())),
+          IconButton(
+            icon: Obx(() =>
+                Icon(t.isDark.value ? Icons.light_mode : Icons.dark_mode)),
+            onPressed: () => t.toggleTheme(),
+            tooltip: "Toggle theme",
+          ),
+        ],
+      ),
+      body: SafeArea(
+        child: Column(
+          children: [
+            // Search bar
+            Padding(
+              padding: const EdgeInsets.all(8.0),
+              child: Row(children: [
+                Expanded(
+                  child: TextField(
+                    onChanged: (v) => c.searchText.value = v,
+                    decoration: InputDecoration(
+                      prefixIcon: const Icon(Icons.search),
+                      hintText: "Search products...",
+                      border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(20)),
+                      isDense: true,
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                // Sort button
+                Obx(() => DropdownButton<bool>(
+                      value: c.sortByPriceAsc.value,
+                      items: const [
+                        DropdownMenuItem(value: true, child: Text("Price ↑")),
+                        DropdownMenuItem(value: false, child: Text("Price ↓")),
+                      ],
+                      onChanged: (v) {
+                        if (v != null) c.sortByPrice(v);
+                      },
+                    )),
+              ]),
+            ),
+
+            // Category chips
+            Container(
+              height: 48,
+              padding: const EdgeInsets.symmetric(horizontal: 8),
+              child: Obx(() {
+                final cats = c.categories;
+                return ListView.builder(
+                  scrollDirection: Axis.horizontal,
+                  itemCount: cats.length,
+                  itemBuilder: (context, i) {
+                    final cat = cats[i];
+                    final selected = c.selectedCategory.value == cat;
+                    return Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 4),
+                      child: ChoiceChip(
+                        label: Text(cat),
+                        selected: selected,
+                        onSelected: (_) => c.selectedCategory.value = cat,
+                      ),
+                    );
+                  },
+                );
+              }),
+            ),
+
+            const SizedBox(height: 8),
+
+            // Product grid
+            Expanded(
+              child: Obx(() {
+                final products = c.filteredProducts;
+                if (products.isEmpty) {
+                  return const Center(child: Text("No products found."));
+                }
+                return GridView.builder(
+                  padding: const EdgeInsets.all(10),
+                  gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                    crossAxisCount: 2,
+                    childAspectRatio: 0.78,
+                    crossAxisSpacing: 10,
+                    mainAxisSpacing: 10,
+                  ),
+                  itemCount: products.length,
+                  itemBuilder: (context, index) {
+                    final p = products[index];
+                    return ProductCard(product: p);
+                  },
+                );
+              }),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// ---------- Product Card ----------
+class ProductCard extends StatelessWidget {
+  final Product product;
+  final ShopController c = Get.find();
+
+  ProductCard({super.key, required this.product});
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: () => Get.to(() => ProductDetailPage(product: product)),
+      child: Card(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        elevation: 4,
+        child: Padding(
+          padding: const EdgeInsets.all(8.0),
+          child: Column(
+            children: [
+              // use first image as thumbnail
+              Expanded(
+                child: product.images.isNotEmpty
+                    ? Image.network(product.images[0]['url']!,
+                        fit: BoxFit.contain)
+                    : const SizedBox.shrink(),
+              ),
+              Text(product.name,
+                  style: const TextStyle(fontWeight: FontWeight.bold)),
+              const SizedBox(height: 4),
+              Text("\$${product.price.toStringAsFixed(2)}",
+                  style: const TextStyle(color: Colors.purple)),
+              const SizedBox(height: 6),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Obx(() => IconButton(
+                        icon: Icon(
+                            product.isFavorite.value
+                                ? Icons.favorite
+                                : Icons.favorite_border,
+                            color: Colors.pink),
+                        onPressed: () => c.toggleFavorite(product),
+                      )),
+                  IconButton(
+                    icon: const Icon(Icons.add_shopping_cart),
+                    onPressed: () {
+                      c.addToCart(product, qty: 1);
+                      Get.snackbar("Added", "${product.name} added to cart",
+                          snackPosition: SnackPosition.BOTTOM);
+                    },
+                  ),
+                ],
+              )
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// ---------- Product Detail Page (with image slider) ----------
+class ProductDetailPage extends StatelessWidget {
+  final Product product;
+  final ShopController c = Get.find();
+
+  ProductDetailPage({super.key, required this.product});
+
+  @override
+  Widget build(BuildContext context) {
+    final PageController pageCtrl = PageController();
+    return Scaffold(
+      appBar: AppBar(title: Text(product.name)),
+      body: SingleChildScrollView(
+        padding: const EdgeInsets.all(12),
+        child: Column(
+          children: [
+            // image slider
+            SizedBox(
+              height: 220,
+              child: PageView.builder(
+                controller: pageCtrl,
+                itemCount: product.images.length,
+                itemBuilder: (context, i) {
+                  final map = product.images[i];
+                  return Column(
+                    children: [
+                      Expanded(
+                          child:
+                              Image.network(map['url']!, fit: BoxFit.contain)),
+                      const SizedBox(height: 6),
+                      Text(map['title'] ?? '',
+                          style: const TextStyle(fontWeight: FontWeight.bold)),
+                    ],
+                  );
+                },
+              ),
+            ),
+            const SizedBox(height: 12),
+            Text(product.name,
+                style:
+                    const TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
+            const SizedBox(height: 6),
+            Text(product.description),
+            const SizedBox(height: 12),
+            Text("Category: ${product.category}"),
+            const SizedBox(height: 8),
+            Text("Price: \$${product.price.toStringAsFixed(2)}",
+                style: const TextStyle(fontSize: 18, color: Colors.purple)),
+            const SizedBox(height: 12),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                ElevatedButton.icon(
+                  icon: const Icon(Icons.add_shopping_cart),
+                  label: const Text("Add to Cart"),
+                  onPressed: () {
+                    c.addToCart(product, qty: 1);
+                    Get.snackbar("Added", "${product.name} added to cart",
+                        snackPosition: SnackPosition.BOTTOM);
+                  },
+                ),
+                const SizedBox(width: 10),
+                ElevatedButton.icon(
+                  icon: const Icon(Icons.favorite),
+                  label: const Text("Favorite"),
+                  onPressed: () {
+                    c.toggleFavorite(product);
+                    Get.snackbar("Favorite", "${product.name} favorite toggled",
+                        snackPosition: SnackPosition.BOTTOM);
+                  },
+                ),
+              ],
+            )
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// ---------- Favorites Page ----------
+class FavoritePage extends StatelessWidget {
+  final ShopController c = Get.find();
+  FavoritePage({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: const Text("❤️ Favorites")),
+      body: Obx(() {
+        if (c.favorites.isEmpty)
+          return const Center(child: Text("No favorites yet."));
+        return ListView.builder(
+          itemCount: c.favorites.length,
+          itemBuilder: (context, i) {
+            final p = c.favorites[i];
+            return ListTile(
+              leading: p.images.isNotEmpty
+                  ? Image.network(p.images[0]['url']!)
+                  : null,
+              title: Text(p.name),
+              subtitle: Text("\$${p.price.toStringAsFixed(2)}"),
+              trailing: IconButton(
+                icon: const Icon(Icons.delete, color: Colors.red),
+                onPressed: () => c.toggleFavorite(p),
+              ),
+            );
+          },
+        );
+      }),
+    );
+  }
+}
+
+// ---------- Cart Page ----------
+class CartPage extends StatelessWidget {
+  final ShopController c = Get.find();
+  CartPage({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    final nameCtrl = TextEditingController();
+    final phoneCtrl = TextEditingController();
+    final addressCtrl = TextEditingController();
+    var paymentMethod = "COD".obs; // default
+
+    return Scaffold(
+      appBar: AppBar(title: const Text("🛒 Cart")),
+      body: Obx(() {
+        if (c.cart.isEmpty) {
+          return const Center(child: Text("Cart is empty!"));
+        }
+        return Column(
+          children: [
+            Expanded(
+              child: ListView.builder(
+                itemCount: c.cart.length,
+                itemBuilder: (context, i) {
+                  final item = c.cart[i];
+                  return Card(
+                    child: ListTile(
+                      leading: item.product.images.isNotEmpty
+                          ? Image.network(item.product.images[0]['url']!)
+                          : null,
+                      title: Text(item.product.name),
+                      subtitle: Obx(() => Text(
+                          "Qty: ${item.quantity.value}  •  Total: \$${item.total.toStringAsFixed(2)}")),
+                      trailing: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          IconButton(
+                              icon: const Icon(Icons.remove_circle),
+                              onPressed: () => c.decreaseQuantity(item)),
+                          IconButton(
+                              icon: const Icon(Icons.add_circle),
+                              onPressed: () => c.increaseQuantity(item)),
+                          IconButton(
+                              icon: const Icon(Icons.delete),
+                              onPressed: () => c.removeFromCart(item)),
+                        ],
+                      ),
+                    ),
+                  );
+                },
+              ),
+            ),
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: Colors.purple.shade100,
+                borderRadius: const BorderRadius.only(
+                    topLeft: Radius.circular(12),
+                    topRight: Radius.circular(12)),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Text("Total: \$${c.totalPrice.toStringAsFixed(2)}",
+                      style: const TextStyle(
+                          fontSize: 18, fontWeight: FontWeight.bold)),
+                  const SizedBox(height: 8),
+
+                  // Checkout form (simple)
+                  TextField(
+                      controller: nameCtrl,
+                      decoration: const InputDecoration(labelText: "Name")),
+                  TextField(
+                      controller: phoneCtrl,
+                      decoration: const InputDecoration(labelText: "Phone")),
+                  TextField(
+                      controller: addressCtrl,
+                      decoration: const InputDecoration(labelText: "Address")),
+                  const SizedBox(height: 6),
+
+                  Row(children: [
+                    Obx(() => Radio<String>(
+                        value: "COD",
+                        groupValue: paymentMethod.value,
+                        onChanged: (v) => paymentMethod.value = v!)),
+                    const Text("Cash on Delivery"),
+                    const SizedBox(width: 20),
+                    Obx(() => Radio<String>(
+                        value: "Card",
+                        groupValue: paymentMethod.value,
+                        onChanged: (v) => paymentMethod.value = v!)),
+                    const Text("Card"),
+                  ]),
+
+                  // If Card selected, show simple card fields
+                  Obx(() => paymentMethod.value == "Card"
+                      ? Column(children: [
+                          TextField(
+                              decoration: const InputDecoration(
+                                  labelText: "Card Number")),
+                          TextField(
+                              decoration: const InputDecoration(
+                                  labelText: "Expiry MM/YY")),
+                          TextField(
+                              decoration:
+                                  const InputDecoration(labelText: "CVV")),
+                        ])
+                      : const SizedBox.shrink()),
+
+                  const SizedBox(height: 8),
+                  ElevatedButton.icon(
+                    icon: const Icon(Icons.payment),
+                    label: const Text("Place Order"),
+                    onPressed: () {
+                      final name = nameCtrl.text.trim();
+                      final phone = phoneCtrl.text.trim();
+                      final address = addressCtrl.text.trim();
+                      if (name.isEmpty || phone.isEmpty || address.isEmpty) {
+                        Get.snackbar(
+                            "Error", "Please fill name, phone, address",
+                            snackPosition: SnackPosition.BOTTOM);
+                        return;
+                      }
+                      // simulate card payment if selected (no real processing)
+                      if (paymentMethod.value == "Card") {
+                        Get.snackbar(
+                            "Card Payment", "Simulated card payment successful",
+                            snackPosition: SnackPosition.BOTTOM);
+                      }
+                      c.checkout(
+                          name: name,
+                          phone: phone,
+                          address: address,
+                          paymentMethod: paymentMethod.value);
+                      Get.snackbar("Order Placed",
+                          "Your order is placed and pending approval",
+                          snackPosition: SnackPosition.BOTTOM);
+                      Get.offAll(() => ProductListPage());
+                    },
+                  )
+                ],
+              ),
+            )
+          ],
+        );
+      }),
+    );
+  }
+}
+
+// ---------- Admin Page (Add/Edit/Delete products, Orders) ----------
+class AdminPage extends StatelessWidget {
+  final ShopController c = Get.find();
+  AdminPage({super.key});
+
+  final nameCtrl = TextEditingController();
+  final priceCtrl = TextEditingController();
+  final categoryCtrl = TextEditingController();
+  final descCtrl = TextEditingController();
+  final imageUrlCtrl = TextEditingController();
+
+  void clearAddFields() {
+    nameCtrl.clear();
+    priceCtrl.clear();
+    categoryCtrl.clear();
+    descCtrl.clear();
+    imageUrlCtrl.clear();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: const Text("👑 Admin Panel")),
+      body: SingleChildScrollView(
+        padding: const EdgeInsets.all(12),
+        child: Column(
+          children: [
+            const Text("➕ Add New Product",
+                style: TextStyle(fontWeight: FontWeight.bold)),
+            const SizedBox(height: 8),
+            TextField(
+                controller: nameCtrl,
+                decoration: const InputDecoration(labelText: "Name")),
+            TextField(
+                controller: priceCtrl,
+                decoration: const InputDecoration(labelText: "Price")),
+            TextField(
+                controller: categoryCtrl,
+                decoration: const InputDecoration(labelText: "Category")),
+            TextField(
+                controller: imageUrlCtrl,
+                decoration: const InputDecoration(
+                    labelText: "Image URL (single image)")),
+            TextField(
+                controller: descCtrl,
+                decoration: const InputDecoration(labelText: "Description")),
+            const SizedBox(height: 8),
+            ElevatedButton(
+              onPressed: () {
+                final name = nameCtrl.text.trim();
+                final priceText = priceCtrl.text.trim();
+                final category = categoryCtrl.text.trim().isEmpty
+                    ? "Others"
+                    : categoryCtrl.text.trim();
+                final image = imageUrlCtrl.text.trim();
+                final desc = descCtrl.text.trim();
+                if (name.isEmpty || priceText.isEmpty) {
+                  Get.snackbar("Error", "Name & price required",
+                      snackPosition: SnackPosition.BOTTOM);
+                  return;
+                }
+                final price = double.tryParse(priceText) ?? 0.0;
+                final p = Product(
+                  id: 0,
+                  name: name,
+                  description: desc,
+                  price: price,
+                  category: category,
+                  images: image.isNotEmpty
+                      ? [
+                          {'url': image, 'title': name}
+                        ]
+                      : [
+                          {
+                            'url': 'https://via.placeholder.com/150',
+                            'title': name
+                          }
+                        ],
+                );
+                c.addProduct(p);
+                clearAddFields();
+                Get.snackbar("Added", "Product added successfully");
+              },
+              child: const Text("Add Product"),
+            ),
+            const Divider(height: 24),
+            const Text("📦 Manage Products",
+                style: TextStyle(fontWeight: FontWeight.bold)),
+            const SizedBox(height: 8),
+            Obx(() => Column(
+                  children: c.products.map((p) {
+                    return Card(
+                      child: ListTile(
+                        leading: p.images.isNotEmpty
+                            ? Image.network(p.images[0]['url']!)
+                            : null,
+                        title: Text(p.name),
+                        subtitle: Text(
+                            "${p.category} • \$${p.price.toStringAsFixed(2)}"),
+                        trailing:
+                            Row(mainAxisSize: MainAxisSize.min, children: [
+                          IconButton(
+                              icon:
+                                  const Icon(Icons.edit, color: Colors.orange),
+                              onPressed: () => _showEditDialog(context, p)),
+                          IconButton(
+                              icon: const Icon(Icons.delete, color: Colors.red),
+                              onPressed: () {
+                                c.deleteProduct(p.id);
+                                Get.snackbar("Deleted", "Product removed");
+                              }),
+                        ]),
+                      ),
+                    );
+                  }).toList(),
+                )),
+            const Divider(height: 24),
+            const Text("📝 Orders",
+                style: TextStyle(fontWeight: FontWeight.bold)),
+            const SizedBox(height: 8),
+            Obx(() {
+              if (c.orders.isEmpty) return const Text("No orders yet");
+              return Column(
+                  children: c.orders.reversed.map((order) {
+                return Card(
+                  child: ListTile(
+                    title: Obx(() => Text(
+                        "Order #${order.id} • \$${order.total.toStringAsFixed(2)} • ${order.status.value}")),
+                    subtitle: Text(
+                        "By ${order.name} • ${order.phone}\n${order.address}\nItems: ${order.items.map((i) => "${i.product.name} x${i.quantity.value}").join(', ')}\nTime: ${order.createdAt.toString()} • Payment: ${order.paymentMethod}"),
+                    isThreeLine: true,
+                    trailing: Obx(() => order.status.value == "Pending"
+                        ? ElevatedButton(
+                            onPressed: () {
+                              c.approveOrder(order);
+                              Get.snackbar(
+                                  "Approved", "Order #${order.id} approved");
+                            },
+                            child: const Text("Approve"))
+                        : const Icon(Icons.check_circle, color: Colors.green)),
+                  ),
+                );
+              }).toList());
+            }),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _showEditDialog(BuildContext context, Product p) {
+    final editName = TextEditingController(
+        text: p.name.replaceAll(RegExp(r'^🧸|🚗|📚|🦖'), '').trim());
+    final editPrice = TextEditingController(text: p.price.toString());
+    final editCategory = TextEditingController(text: p.category);
+    final editDesc = TextEditingController(text: p.description);
+    final editImage = TextEditingController(
+        text: p.images.isNotEmpty ? p.images[0]['url'] : '');
+
+    Get.dialog(
+      AlertDialog(
+        title: const Text("Edit Product"),
+        content: SingleChildScrollView(
+          child: Column(
+            children: [
+              TextField(
+                  controller: editName,
+                  decoration: const InputDecoration(labelText: "Name")),
+              TextField(
+                  controller: editPrice,
+                  decoration: const InputDecoration(labelText: "Price")),
+              TextField(
+                  controller: editCategory,
+                  decoration: const InputDecoration(labelText: "Category")),
+              TextField(
+                  controller: editImage,
+                  decoration: const InputDecoration(labelText: "Image URL")),
+              TextField(
+                  controller: editDesc,
+                  decoration: const InputDecoration(labelText: "Description")),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(onPressed: () => Get.back(), child: const Text("Cancel")),
+          ElevatedButton(
+              onPressed: () {
+                final name = editName.text.trim();
+                final price = double.tryParse(editPrice.text.trim()) ?? p.price;
+                final category = editCategory.text.trim();
+                final image = editImage.text.trim();
+                final desc = editDesc.text.trim();
+                final updated = p.copyWith(
+                  name: name,
+                  price: price,
+                  category: category,
+                  description: desc,
+                  images: image.isNotEmpty
+                      ? [
+                          {'url': image, 'title': name}
+                        ]
+                      : p.images,
+                );
+                // maintain favorite Rx field
+                updated.isFavorite = p.isFavorite;
+                Get.find<ShopController>().updateProduct(updated);
+                Get.back();
+                Get.snackbar("Updated", "Product updated");
+              },
+              child: const Text("Save")),
+        ],
+      ),
+    );
+  }
+}
